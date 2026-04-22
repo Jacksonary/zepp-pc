@@ -67,6 +67,12 @@ class AuthRequest(BaseModel):
     auth_key: str
 
 
+class ZeppLoginRequest(BaseModel):
+    email: str
+    password: str
+    region: str = "international"
+
+
 class DndRequest(BaseModel):
     enabled: bool = True
     start_h: int = 22
@@ -84,6 +90,37 @@ class GoalRequest(BaseModel):
 class NotificationRequest(BaseModel):
     message: str
     title: str = ""
+
+
+@router.post("/zepp-login")
+async def zepp_login(req: ZeppLoginRequest):
+    """Login to Zepp cloud, import all bound devices with their auth keys."""
+    from src.server.api.zepp import get_devices_from_zepp
+    try:
+        cloud_devices = await get_devices_from_zepp(req.email, req.password, req.region)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Zepp login error: {e}")
+        raise HTTPException(500, f"网络错误：{e}")
+
+    if not cloud_devices:
+        raise HTTPException(404, "该账号下未找到已绑定的手表设备")
+
+    config = _load_config()
+    added = []
+    for d in cloud_devices:
+        mac = d["mac"]
+        config.setdefault(mac, {})["auth_key"] = d["auth_key"]
+        config[mac]["name"] = d["name"]
+        if mac not in _devices:
+            _devices[mac] = HuamiDevice(mac=mac, auth_key=d["auth_key"])
+        else:
+            _devices[mac].auth_key = d["auth_key"]
+        added.append({"mac": mac, "name": d["name"]})
+
+    _save_config(config)
+    return {"devices": added, "count": len(added)}
 
 
 # ── UI ────────────────────────────────────────────────────────────────
