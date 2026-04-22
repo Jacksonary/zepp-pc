@@ -57,7 +57,7 @@ jobs:
         shell: pwsh
         run: |
           pip install --quiet uv
-          uv pip install --system -e ".[dev]" pyinstaller
+          uv pip install --system -e ".[dev,gui]" pyinstaller
 
       - name: Install dependencies (Unix)
         if: matrix.os != 'windows'
@@ -68,7 +68,7 @@ jobs:
           python -m venv .venv
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/pip install uv
-          .venv/bin/uv pip install -e ".[dev]" pyinstaller
+          .venv/bin/uv pip install -e ".[dev,gui]" pyinstaller
 
       - name: Run tests (Windows)
         if: matrix.os == 'windows'
