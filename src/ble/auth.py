@@ -12,14 +12,14 @@ Reference: Gadgetbridge Huami crypto implementation + huami-token
 """
 
 import logging
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 logger = logging.getLogger(__name__)
 
 
 def encrypt_aes_ecb(key: bytes, plaintext: bytes) -> bytes:
     """Encrypt 16 bytes using AES-128 ECB mode."""
-    cipher = Cipher(algorithms.AES(key), mode=None)
+    cipher = Cipher(algorithms.AES(key), mode=modes.ECB())
     encryptor = cipher.encryptor()
     return encryptor.update(plaintext) + encryptor.finalize()
 
