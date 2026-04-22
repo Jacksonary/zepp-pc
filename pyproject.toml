@@ -7,7 +7,6 @@ dependencies = [
     "bleak>=0.22.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
-    "pywebview>=5.0.0",
     "cryptography>=43.0.0",
 ]
 
@@ -17,6 +16,7 @@ dev = [
     "pytest-asyncio>=0.23.0",
 ]
 gui = [
+    "pywebview>=5.0.0",
     "qtpy>=2.4.0",
     "PyQt6>=6.5.0",
     "PyQt6-WebEngine>=6.5.0",

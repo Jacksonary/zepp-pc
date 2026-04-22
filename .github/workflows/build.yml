@@ -5,10 +5,16 @@ on:
     tags:
       - "v*"
 
+defaults:
+  run:
+    timeout-minutes: 30
+
 jobs:
   build:
     name: ${{ matrix.os }} (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:

@@ -27,7 +27,6 @@ a = Analysis(
         "uvicorn.protocols.websockets.auto",
         "uvicorn.lifespan",
         "uvicorn.lifespan.on",
-        "webview",
         "bleak",
         "bleak.backends",
         "bleak.backends.bluezdbus",
@@ -37,7 +36,14 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "scipy", "numpy"],
+    excludes=[
+        "tkinter", "matplotlib", "scipy", "numpy",
+        # Heavy GUI deps — pywebview is loaded dynamically in main.py
+        # The packaged binary will run in server mode (browser access)
+        "webview", "pywebview",
+        "PyQt6", "PyQt5", "PySide6", "PySide2",
+        "gi", "gtk",
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=None,

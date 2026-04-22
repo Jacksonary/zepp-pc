@@ -11,7 +11,12 @@ import time
 import urllib.request
 
 import uvicorn
-import webview
+
+try:
+    import webview
+    HAS_WEBVIEW = True
+except ImportError:
+    HAS_WEBVIEW = False
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,18 +59,32 @@ def main():
     url = f"http://{HOST}:{PORT}/api/"
     logger.info(f"Server ready at {url}")
 
-    # Create pywebview window
-    window = webview.create_window(
-        title="Zepp PC Manager",
-        url=url,
-        width=900,
-        height=700,
-        resizable=True,
-        min_size=(700, 500),
-    )
+    if HAS_WEBVIEW:
+        # Create pywebview window
+        window = webview.create_window(
+            title="Zepp PC Manager",
+            url=url,
+            width=900,
+            height=700,
+            resizable=True,
+            min_size=(700, 500),
+        )
 
-    # Start pywebview (blocks until window closes)
-    webview.start(debug=False)
+        # Start pywebview (blocks until window closes)
+        webview.start(debug=False)
+    else:
+        # No GUI — run server in foreground
+        logger.info("No GUI available (pywebview not installed). Running server mode.")
+        logger.info(f"Open {url} in your browser to use the app.")
+        import signal
+        import sys
+        signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        try:
+            while True:
+                time.sleep(1)
+        except (KeyboardInterrupt, SystemExit):
+            pass
 
 
 if __name__ == "__main__":
