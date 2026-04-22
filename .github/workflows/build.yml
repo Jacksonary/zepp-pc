@@ -44,60 +44,64 @@ jobs:
       - name: Install system dependencies (Linux)
         if: matrix.os == 'linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libxcb1 libfontconfig1
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libxcb1 libfontconfig1 \
+            libxkbcommon0 libdbus-1-3 libxcb-xinerama0
 
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows'
         shell: pwsh
         run: |
           python -m venv .venv
-          .venv\Scripts\activate
-          python -m pip install --upgrade pip
-          pip install uv
-          uv pip install -e ".[dev]" pyinstaller
+          .\.venv\Scripts\python -m pip install --upgrade pip
+          .\.venv\Scripts\pip install uv
+          .\.venv\Scripts\uv pip install -e ".[dev]" pyinstaller
 
       - name: Install dependencies (Unix)
         if: matrix.os != 'windows'
         shell: bash
+        env:
+          PYTHONPATH: "."
         run: |
           python -m venv .venv
-          source .venv/bin/activate
-          pip install --upgrade pip
-          pip install uv
-          uv pip install -e ".[dev]" pyinstaller
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install uv
+          .venv/bin/uv pip install -e ".[dev]" pyinstaller
 
       - name: Run tests (Windows)
         if: matrix.os == 'windows'
         shell: pwsh
+        env:
+          PYTHONPATH: "."
         run: |
-          .venv\Scripts\activate
-          pytest tests/ -v
+          .\.venv\Scripts\pytest tests/ -v
 
       - name: Run tests (Unix)
         if: matrix.os != 'windows'
         shell: bash
+        env:
+          PYTHONPATH: "."
         run: |
-          source .venv/bin/activate
-          pytest tests/ -v
+          .venv/bin/pytest tests/ -v
 
       - name: Build executable (Windows)
         if: matrix.os == 'windows'
         shell: pwsh
         env:
+          PYTHONPATH: "."
           ZEPP_PC_CONSOLE: "0"
         run: |
-          .venv\Scripts\activate
-          pyinstaller build.spec --clean
+          .\.venv\Scripts\pyinstaller build.spec --clean
 
       - name: Build executable (Unix)
         if: matrix.os != 'windows'
         shell: bash
         env:
+          PYTHONPATH: "."
           ZEPP_PC_CONSOLE: "0"
         run: |
-          source .venv/bin/activate
-          pyinstaller build.spec --clean
+          .venv/bin/pyinstaller build.spec --clean
 
       - name: Package output (Windows)
         if: matrix.os == 'windows'
@@ -111,7 +115,7 @@ jobs:
           New-Item -ItemType Directory -Path $name -Force
           Copy-Item "dist\zepp-pc.exe" "$name\$name.exe"
           7z a "$name.zip" "$name"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "archive=$name.zip"
+          echo "archive=$name.zip" >> $env:GITHUB_OUTPUT
         id: package-win
 
       - name: Package output (Unix)
