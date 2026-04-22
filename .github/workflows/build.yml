@@ -44,19 +44,17 @@ jobs:
       - name: Install system dependencies (Linux)
         if: matrix.os == 'linux'
         run: |
-          sudo apt-get update -q
+          sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libxcb1 libfontconfig1 \
-            libxkbcommon0 libdbus-1-3 libxcb-xinerama0
+            libxkbcommon0 libdbus-1-3 libxcb-xinerama0 2>&1 | tail -5
 
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows'
         shell: pwsh
         run: |
-          python -m venv .venv
-          .\.venv\Scripts\python -m pip install --upgrade pip
-          .\.venv\Scripts\pip install uv
-          .\.venv\Scripts\uv pip install -e ".[dev]" pyinstaller
+          pip install --quiet uv
+          uv pip install --system -e ".[dev]" pyinstaller
 
       - name: Install dependencies (Unix)
         if: matrix.os != 'windows'
@@ -75,7 +73,7 @@ jobs:
         env:
           PYTHONPATH: "."
         run: |
-          .\.venv\Scripts\pytest tests/ -v
+          pytest tests/ -v
 
       - name: Run tests (Unix)
         if: matrix.os != 'windows'
@@ -92,7 +90,7 @@ jobs:
           PYTHONPATH: "."
           ZEPP_PC_CONSOLE: "0"
         run: |
-          .\.venv\Scripts\pyinstaller build.spec --clean
+          pyinstaller build.spec --clean
 
       - name: Build executable (Unix)
         if: matrix.os != 'windows'

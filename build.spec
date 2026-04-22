@@ -3,7 +3,8 @@
 import os
 from pathlib import Path
 
-project_root = Path(__file__).parent
+# PyInstaller exec() doesn't provide __file__ on all platforms
+project_root = Path(os.getcwd())
 
 # Use ZEPP_PC_CONSOLE=0 to hide console window (release mode)
 show_console = os.environ.get("ZEPP_PC_CONSOLE", "0") != "0"
