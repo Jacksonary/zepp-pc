@@ -1,0 +1,157 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - os: windows
+            arch: x86_64
+            runner: windows-latest
+            artifact: zepp-pc
+          - os: linux
+            arch: x86_64
+            runner: ubuntu-22.04
+            artifact: zepp-pc
+          - os: macos
+            arch: arm64
+            runner: macos-14
+            artifact: zepp-pc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          tag="${{ github.ref_name }}"
+          ver="${tag#v}"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "Building version: $ver"
+
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0 libegl1 libgl1 libxcb1 libfontconfig1
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .venv\Scripts\activate
+          python -m pip install --upgrade pip
+          pip install uv
+          uv pip install -e ".[dev]" pyinstaller
+
+      - name: Install dependencies (Unix)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install uv
+          uv pip install -e ".[dev]" pyinstaller
+
+      - name: Run tests (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          .venv\Scripts\activate
+          pytest tests/ -v
+
+      - name: Run tests (Unix)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          source .venv/bin/activate
+          pytest tests/ -v
+
+      - name: Build executable (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        env:
+          ZEPP_PC_CONSOLE: "0"
+        run: |
+          .venv\Scripts\activate
+          pyinstaller build.spec --clean
+
+      - name: Build executable (Unix)
+        if: matrix.os != 'windows'
+        shell: bash
+        env:
+          ZEPP_PC_CONSOLE: "0"
+        run: |
+          source .venv/bin/activate
+          pyinstaller build.spec --clean
+
+      - name: Package output (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.version }}"
+          $os = "${{ matrix.os }}"
+          $arch = "${{ matrix.arch }}"
+          $name = "zepp-pc-$ver-$os-$arch"
+
+          New-Item -ItemType Directory -Path $name -Force
+          Copy-Item "dist\zepp-pc.exe" "$name\$name.exe"
+          7z a "$name.zip" "$name"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "archive=$name.zip"
+        id: package-win
+
+      - name: Package output (Unix)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          ver="${{ steps.version.outputs.version }}"
+          os="${{ matrix.os }}"
+          arch="${{ matrix.arch }}"
+          name="zepp-pc-${ver}-${os}-${arch}"
+
+          mkdir -p "$name"
+
+          if [ "$os" = "macos" ]; then
+            if [ -f "dist/zepp-pc" ]; then
+              cp "dist/zepp-pc" "$name/${name}"
+            elif [ -d "dist/zepp-pc.app" ]; then
+              cp -r "dist/zepp-pc.app" "$name/"
+            fi
+          else
+            if [ -f "dist/zepp-pc" ]; then
+              cp "dist/zepp-pc" "$name/${name}"
+            else
+              cp -r "dist/zepp-pc/"* "$name/"
+            fi
+          fi
+
+          zip -r "${name}.zip" "$name"
+          echo "archive=${name}.zip" >> "$GITHUB_OUTPUT"
+        id: package-unix
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package-win.outputs.archive || steps.package-unix.outputs.archive }}
+          path: ${{ steps.package-win.outputs.archive || steps.package-unix.outputs.archive }}
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package-win.outputs.archive || steps.package-unix.outputs.archive }}
+          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

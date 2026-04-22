@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zepp PC Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .card-hover { transition: box-shadow 0.2s; }
+        .card-hover:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #e5e7eb; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-40">
+        <div class="max-w-5xl mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                </svg>
+                <h1 class="text-xl font-bold text-gray-900">Zepp PC Manager</h1>
+            </div>
+            <div class="flex items-center gap-3">
+                <button onclick="openScanModal()" class="text-sm text-gray-600 hover:text-blue-600 flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    扫描设备
+                </button>
+                <button onclick="openHelpModal()" class="text-sm text-gray-600 hover:text-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
+                    ?
+                </button>
+                <span class="text-xs text-gray-400">v0.1.0</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-6 py-8">
+        <!-- Add Device Form -->
+        <section class="mb-8">
+            <div class="bg-white rounded-xl border border-gray-200 p-6 card-hover">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">添加设备</h2>
+                <div class="flex gap-3 items-end flex-wrap">
+                    <div>
+                        <label class="block text-sm text-gray-600 mb-1">设备 MAC 地址</label>
+                        <input type="text" id="newMac" placeholder="AA:BB:CC:DD:EE:FF"
+                               class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-56 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono">
+                    </div>
+                    <button onclick="addDevice()" id="addBtn"
+                            class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors flex items-center gap-2">
+                        <span id="addBtnText">连接</span>
+                    </button>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">在手表 设置 > 关于 中查看 MAC 地址，或点击「扫描设备」自动发现</p>
+            </div>
+        </section>
+
+        <!-- Device List -->
+        <section id="deviceList"></section>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="text-center py-16">
+            <svg class="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                      d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+            </svg>
+            <p class="text-gray-400">尚未添加设备</p>
+            <p class="text-sm text-gray-300 mt-1">输入 MAC 地址或扫描附近的手表开始连接</p>
+        </div>
+
+        <!-- Toast Notification -->
+        <div id="toast" class="hidden fixed bottom-6 right-6 bg-gray-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-50 fade-in"></div>
+    </main>
+
+    <!-- Auth Modal -->
+    <div id="authModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-lg p-6 w-[420px] max-w-full mx-4 fade-in">
+            <h3 class="text-lg font-semibold text-gray-800 mb-1">设备认证</h3>
+            <p class="text-sm text-gray-500 mb-4">输入 Auth Key 完成配对</p>
+            <label class="block text-sm text-gray-600 mb-1">Auth Key</label>
+            <input type="text" id="authKey" placeholder="32 位十六进制字符串" maxlength="32"
+                   class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full mb-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono">
+            <button onclick="showAuthHelp()" class="text-xs text-blue-600 hover:text-blue-800 mb-4">如何获取 Auth Key？</button>
+            <div class="flex gap-2 justify-end">
+                <button onclick="closeAuthModal()" class="text-gray-500 hover:text-gray-700 text-sm px-4 py-2">取消</button>
+                <button onclick="submitAuth()" id="authBtn"
+                        class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2 rounded-lg flex items-center gap-2">
+                    <span id="authBtnText">认证</span>
+                </button>
+            </div>
+            <div id="authError" class="hidden mt-3 p-2 bg-red-50 text-red-600 text-xs rounded-lg"></div>
+        </div>
+    </div>
+
+    <!-- Auth Help Modal -->
+    <div id="authHelpModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-lg p-6 w-[500px] max-w-full mx-4 fade-in max-h-[80vh] overflow-y-auto">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">如何获取 Auth Key？</h3>
+            <div class="space-y-4 text-sm text-gray-700">
+                <div>
+                    <p class="font-medium mb-1">方法一：使用 huami-token 工具（推荐）</p>
+                    <ol class="list-decimal list-inside space-y-1 text-xs text-gray-600">
+                        <li>安装 Python 3.10+ 和 pip</li>
+                        <li>运行 <code class="bg-gray-100 px-1 rounded">pip install huami-token</code></li>
+                        <li>运行 <code class="bg-gray-100 px-1 rounded">python -m huami_token</code></li>
+                        <li>按提示登录 Zepp 账号</li>
+                        <li>在输出中找到你的设备对应的 auth_key</li>
+                    </ol>
+                </div>
+                <div>
+                    <p class="font-medium mb-1">方法二：从 Zepp 手机 App 提取</p>
+                    <ol class="list-decimal list-inside space-y-1 text-xs text-gray-600">
+                        <li>在手机上安装 Zepp App 并完成手表配对</li>
+                        <li>使用文件管理器找到 Zepp 缓存目录下的 token 文件</li>
+                        <li>或在 Android 上使用 logcat 过滤 Zepp 的日志</li>
+                    </ol>
+                </div>
+                <div class="bg-yellow-50 p-3 rounded-lg">
+                    <p class="font-medium text-yellow-800">注意</p>
+                    <p class="text-yellow-700 text-xs mt-1">Auth Key 是 32 位十六进制字符串（16 字节），每个设备的 Key 不同，更换设备后需要重新获取。</p>
+                </div>
+            </div>
+            <div class="flex justify-end mt-4">
+                <button onclick="closeAuthHelpModal()" class="bg-blue-600 text-white text-sm font-medium px-5 py-2 rounded-lg">知道了</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scan Modal -->
+    <div id="scanModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-lg p-6 w-[400px] max-w-full mx-4 fade-in">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">扫描设备</h3>
+            <div id="scanModalContent">
+                <p class="text-sm text-gray-500 mb-4">正在搜索附近的 Amazfit/Zepp 手表...</p>
+                <div class="flex items-center justify-center py-8">
+                    <div class="spinner w-8 h-8 border-4"></div>
+                </div>
+            </div>
+            <div id="scanModalResults" class="hidden space-y-2 mb-4 max-h-60 overflow-y-auto"></div>
+            <div class="flex justify-end">
+                <button onclick="closeScanModal()" class="text-gray-500 hover:text-gray-700 text-sm px-4 py-2">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="helpModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-lg p-6 w-[500px] max-w-full mx-4 fade-in max-h-[80vh] overflow-y-auto">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">使用帮助</h3>
+            <div class="space-y-3 text-sm text-gray-700">
+                <div>
+                    <p class="font-medium">第一步：获取 Auth Key</p>
+                    <p class="text-xs text-gray-500">使用 huami-token 工具从 Zepp 云获取设备认证密钥</p>
+                </div>
+                <div>
+                    <p class="font-medium">第二步：添加设备</p>
+                    <p class="text-xs text-gray-500">在手表 设置 > 关于 中找到 MAC 地址，或在 App 中点击「扫描设备」自动发现</p>
+                </div>
+                <div>
+                    <p class="font-medium">第三步：认证连接</p>
+                    <p class="text-xs text-gray-500">输入 Auth Key 完成配对，成功后即可读取数据</p>
+                </div>
+                <div class="bg-gray-50 p-3 rounded-lg">
+                    <p class="font-medium">支持的手表型号</p>
+                    <ul class="text-xs text-gray-500 mt-1 space-y-0.5">
+                        <li>• Amazfit T-Rex 2 / T-Rex 3 / T-Rex 3 Pro / T-Rex Ultra</li>
+                        <li>• Amazfit GTR / GTS 系列（Zepp OS 设备）</li>
+                        <li>• Amazfit Bip 系列</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="flex justify-end mt-4">
+                <button onclick="document.getElementById('helpModal').classList.add('hidden')" class="bg-blue-600 text-white text-sm font-medium px-5 py-2 rounded-lg">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
