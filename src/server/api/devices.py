@@ -138,10 +138,10 @@ async def index():
 async def scan_devices():
     """Scan for nearby Amazfit/Zepp BLE devices."""
     try:
-        results = await scan_for_amazfit_devices(timeout=5.0)
+        results = await scan_for_amazfit_devices(timeout=8.0)
         return {"devices": results}
     except Exception as e:
-        raise HTTPException(500, f"Scan failed: {e}")
+        raise HTTPException(500, f"蓝牙扫描失败：{e}")
 
 
 # ── Device Management ─────────────────────────────────────────────────

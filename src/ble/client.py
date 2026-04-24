@@ -19,6 +19,7 @@ Note on Zepp OS 2.x (T-Rex 3):
 import asyncio
 import logging
 import secrets
+import sys
 
 from bleak import BleakClient, BleakScanner, BLEDevice
 
@@ -380,18 +381,39 @@ class HuamiDevice:
             return 0
 
 
-async def scan_for_amazfit_devices(name_pattern: str = "", timeout: float = 5.0) -> list[dict]:
-    """Scan for Amazfit/Zepp BLE devices without needing a device instance."""
+async def scan_for_amazfit_devices(name_pattern: str = "", timeout: float = 8.0) -> list[dict]:
+    """Scan for Amazfit/Zepp BLE devices without needing a device instance.
+
+    On Windows, BleakScanner must run in a fresh event loop to avoid WinRT
+    conflicts with the uvicorn event loop. We spawn it in a thread executor.
+    """
     _known_prefixes = ("amazfit", "t-rex", "gtr", "gts", "zepp", "bip", "band")
     logger.info("Scanning for Amazfit/Zepp devices...")
+
+    def _run_scan() -> list:
+        import asyncio as _asyncio
+        async def _inner():
+            return await BleakScanner.discover(timeout=timeout)
+        # On Windows, create a dedicated event loop in the thread
+        loop = _asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_inner())
+        finally:
+            loop.close()
+
     try:
-        devices = await BleakScanner.discover(timeout=timeout)
+        if sys.platform == "win32":
+            # Run in executor to avoid WinRT/asyncio event loop conflicts
+            loop = asyncio.get_event_loop()
+            raw_devices = await loop.run_in_executor(None, _run_scan)
+        else:
+            raw_devices = await BleakScanner.discover(timeout=timeout)
     except Exception as e:
         logger.error(f"BLE scan failed: {e}")
-        return []
+        raise
 
     results = []
-    for d in devices:
+    for d in raw_devices:
         name = d.name or ""
         name_lower = name.lower()
         if name_pattern:
