@@ -117,6 +117,10 @@ class HuamiDevice:
         Sets self._notify_uuid, self._write_uuid, self._auth_uuid and returns
         True when the mandatory notify + write pair is available.
         """
+        if self._client is None:
+            self._state.error = "Internal error: BleakClient is None in _find_huami_chars"
+            return False
+
         _HUAMI_SUFFIX = "3512-2118-0009af100700"
 
         # Build uuid → properties map from all discovered services
@@ -179,7 +183,16 @@ class HuamiDevice:
         return True
 
     async def connect(self) -> bool:
-        """Establish BLE connection to the watch."""
+        """Establish BLE connection to the watch.
+
+        On Windows, bleak's WinRT backend occasionally fails with
+        "'NoneType' object has no attribute 'services'" when the internal
+        device handle is stale (device was discovered but became briefly
+        unavailable, or the Windows BLE stack has cached stale state).
+        In that case we retry using the MAC address string, which forces
+        bleak to perform a fresh device lookup via BleakScanner, bypassing
+        the cached WinRT handle.
+        """
         if self._ble_device is None:
             found = await self.scan()
             if found is None:
@@ -188,23 +201,63 @@ class HuamiDevice:
 
         logger.info(f"Connecting to {self._ble_device.name or self.mac}...")
 
-        self._client = BleakClient(self._ble_device, timeout=30.0)
+        # Try BLEDevice first (fast — uses cached WinRT device ID).
+        # On Windows, fall back to MAC string (forces fresh device lookup)
+        # if the first attempt fails with a WinRT stale-handle error.
+        _targets: list = [self._ble_device]
+        if sys.platform == "win32":
+            _targets.append(self.mac)
 
+        last_err = ""
+        for attempt, conn_target in enumerate(_targets):
+            self._client = BleakClient(conn_target, timeout=30.0)
+            try:
+                await self._client.connect()
+                break  # connection succeeded
+            except Exception as e:
+                last_err = str(e)
+                self._client = None
+                if attempt < len(_targets) - 1 and (
+                    "NoneType" in last_err or "services" in last_err.lower()
+                    or "assert" in last_err.lower()
+                ):
+                    logger.warning(
+                        f"Connect via BLEDevice failed ({e}), "
+                        "retrying with MAC address string..."
+                    )
+                    continue
+                self._state.error = (
+                    f"Connection failed: {e}  "
+                    "（请确保手表在附近且未被其他设备占用后重试）"
+                )
+                return False
+        else:
+            self._state.error = (
+                f"Connection failed: {last_err}  "
+                "（请重新扫描后再连接）"
+            )
+            return False
+
+        # BLE link up — detect actual GATT UUIDs, then subscribe to notifications
         try:
-            await self._client.connect()
-
-            # Auto-detect actual GATT UUIDs (device may use non-standard values)
             if not await self._find_huami_chars():
+                try:
+                    await self._client.disconnect()
+                except Exception:
+                    pass
                 self._client = None
                 return False
 
-            # Subscribe to the data notification channel (responses + auth packets)
             await self._client.start_notify(
                 self._notify_uuid,
                 self._notification_handler,
             )
         except Exception as e:
             self._state.error = f"Connection failed: {e}"
+            try:
+                await self._client.disconnect()
+            except Exception:
+                pass
             self._client = None
             return False
 
