@@ -1,6 +1,7 @@
 """PyInstaller spec for Zepp PC Manager."""
 
 import os
+import sys
 from pathlib import Path
 
 # PyInstaller exec() doesn't provide __file__ on all platforms
@@ -9,6 +10,40 @@ project_root = Path(os.getcwd())
 # Use ZEPP_PC_CONSOLE=0 to hide console window (release mode)
 show_console = os.environ.get("ZEPP_PC_CONSOLE", "0") != "0"
 
+_is_win = sys.platform == "win32"
+_is_mac = sys.platform == "darwin"
+
+# Base hidden imports for all platforms
+_hidden = [
+    "uvicorn.logging",
+    "uvicorn.loops",
+    "uvicorn.loops.auto",
+    "uvicorn.protocols",
+    "uvicorn.protocols.http",
+    "uvicorn.protocols.http.auto",
+    "uvicorn.protocols.websockets",
+    "uvicorn.protocols.websockets.auto",
+    "uvicorn.lifespan",
+    "uvicorn.lifespan.on",
+    "bleak",
+    "bleak.backends",
+    "bleak.backends.bluezdbus",
+    "webview",
+    "webview.platforms",
+    "webview.platforms.qt",
+]
+
+if _is_win:
+    _hidden += [
+        "bleak.backends.winrt",
+        "webview.platforms.mswebview2",
+        "webview.platforms.winforms",
+    ]
+elif _is_mac:
+    _hidden += [
+        "bleak.backends.corebluetooth",
+    ]
+
 a = Analysis(
     [str(project_root / "main.py")],
     pathex=[],
@@ -16,29 +51,7 @@ a = Analysis(
     datas=[
         (str(project_root / "src" / "server" / "static"), "src/server/static"),
     ],
-    hiddenimports=[
-        "uvicorn.logging",
-        "uvicorn.loops",
-        "uvicorn.loops.auto",
-        "uvicorn.protocols",
-        "uvicorn.protocols.http",
-        "uvicorn.protocols.http.auto",
-        "uvicorn.protocols.websockets",
-        "uvicorn.protocols.websockets.auto",
-        "uvicorn.lifespan",
-        "uvicorn.lifespan.on",
-        "bleak",
-        "bleak.backends",
-        "bleak.backends.bluezdbus",
-        "bleak.backends.winrt",
-        "bleak.backends.corebluetooth",
-        "webview",
-        "webview.platforms",
-        "webview.platforms.mswebview2",
-        "webview.platforms.winforms",
-        "webview.platforms.gtk",
-        "webview.platforms.qt",
-    ],
+    hiddenimports=_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

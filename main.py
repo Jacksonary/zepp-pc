@@ -12,6 +12,8 @@ import urllib.request
 
 import uvicorn
 
+from src.server.main import app as fastapi_app
+
 try:
     import webview
     HAS_WEBVIEW = True
@@ -31,7 +33,7 @@ PORT = 8765
 def run_server():
     """Run FastAPI server in a background thread."""
     config = uvicorn.Config(
-        "src.server.main:app",
+        fastapi_app,
         host=HOST,
         port=PORT,
         log_level="info",
