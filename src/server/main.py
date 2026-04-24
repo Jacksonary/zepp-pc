@@ -24,6 +24,13 @@ def get_static_dir() -> Path:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Zepp PC Manager starting...")
+    from src.server.api.devices import _devices, _load_config
+    from src.ble.client import HuamiDevice
+    config = _load_config()
+    for mac, info in config.items():
+        if mac not in _devices:
+            _devices[mac] = HuamiDevice(mac=mac, auth_key=info.get("auth_key"))
+    logger.info(f"Restored {len(config)} device(s) from config")
     yield
     logger.info("Shutting down...")
 

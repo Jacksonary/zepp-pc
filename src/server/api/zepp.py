@@ -34,6 +34,7 @@ async def get_devices_from_zepp(email: str, password: str, region: str = "intern
             login_url,
             data={
                 "client_id": "HuaMi",
+                "account_name": email,
                 "password": password,
                 "redirect_uri": "https://s3-us-west-2.amazonaws.com/hm-registration/successsignin.html",
                 "country_code": "0",

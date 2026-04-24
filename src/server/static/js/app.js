@@ -42,6 +42,7 @@ function setLoading(btnId, textId, loading, text) {
     const span = document.getElementById(textId);
     if (!btn) return;
     btn.disabled = loading;
+    if (!span) return;
     if (loading) {
         span.innerHTML = `<span class="spinner inline-block mr-1"></span>${text}`;
     } else {
@@ -90,10 +91,9 @@ async function submitZeppLogin() {
             body: JSON.stringify({ email, password, region }),
         });
 
-        const names = res.devices.map(d => d.name).join("、");
-        toast(`已导入 ${res.count} 台设备：${names}`);
-
         document.getElementById("zeppPassword").value = "";
+        const names = res.devices.map(d => d.name).join("、");
+        toast(`已导入 ${res.count} 台设备：${names}。如手表在附近，点设备卡片上的"连接"即可完成认证。`);
         await loadDevices();
     } catch (e) {
         errEl.textContent = e.message;
@@ -206,9 +206,9 @@ function renderDeviceCard(d) {
         </div>` : `
         <div class="flex flex-wrap gap-2">
             ${!isConnected ? `
-            <button onclick="connectDevice('${safeAttr(mac)}')"
+            <button onclick="${d.saved_key ? `connectAndAuth('${safeAttr(mac)}')` : `connectDevice('${safeAttr(mac)}')`}"
                     class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">
-                连接
+                ${d.saved_key ? "连接并认证" : "连接"}
             </button>` : ""}
             ${isConnected ? `
             <button onclick="openAuthModal('${safeAttr(mac)}')"
@@ -295,6 +295,20 @@ async function connectDevice(mac) {
         toast("连接成功");
     } catch (e) {
         toast("连接失败：" + e.message);
+    }
+    await loadDevices();
+}
+
+async function connectAndAuth(mac) {
+    toast("正在连接并认证...");
+    try {
+        await api(`/devices/${mac}/auth`, {
+            method: "POST",
+            body: JSON.stringify({ auth_key: "" }),
+        });
+        toast("认证成功");
+    } catch (e) {
+        toast("连接认证失败：" + e.message);
     }
     await loadDevices();
 }

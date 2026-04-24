@@ -380,9 +380,10 @@ class HuamiDevice:
             return 0
 
 
-async def scan_for_amazfit_devices(name_pattern: str = "Amazfit", timeout: float = 5.0) -> list[dict]:
+async def scan_for_amazfit_devices(name_pattern: str = "", timeout: float = 5.0) -> list[dict]:
     """Scan for Amazfit/Zepp BLE devices without needing a device instance."""
-    logger.info(f"Scanning for devices matching '{name_pattern}'...")
+    _known_prefixes = ("amazfit", "t-rex", "gtr", "gts", "zepp", "bip", "band")
+    logger.info("Scanning for Amazfit/Zepp devices...")
     try:
         devices = await BleakScanner.discover(timeout=timeout)
     except Exception as e:
@@ -392,7 +393,12 @@ async def scan_for_amazfit_devices(name_pattern: str = "Amazfit", timeout: float
     results = []
     for d in devices:
         name = d.name or ""
-        if name_pattern.lower() in name.lower():
+        name_lower = name.lower()
+        if name_pattern:
+            match = name_pattern.lower() in name_lower
+        else:
+            match = any(p in name_lower for p in _known_prefixes)
+        if match:
             results.append({
                 "name": name,
                 "mac": d.address,

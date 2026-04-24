@@ -100,15 +100,15 @@ def set_time_cmd() -> bytes:
 
     Reference: Gadgetbridge HuamiTimeSettingCommand — seconds since 2000-01-01.
     """
-    now = datetime.now()
+    now = datetime.now().astimezone()
     # Unix timestamp minus the 2000-01-01 epoch offset (946684800)
     huami_ts = int(time.time()) - 946684800
 
     # Day of week: 0=Sunday, 1=Monday, ..., 6=Saturday
     dow = (now.weekday() + 1) % 7
 
-    # Assume local timezone offset is not needed; send 0 for simplicity
-    tz_offset = 0
+    # Local timezone offset in minutes (e.g. UTC+8 → 480)
+    tz_offset = int(now.utcoffset().total_seconds() // 60)
     dst = 0
 
     payload = struct.pack("<IhBB", huami_ts, tz_offset, dow, dst)
@@ -137,10 +137,13 @@ def set_goal_cmd(steps: int = 10000, calories: int = 500, active_min: int = 30) 
     """Set daily activity goals.
 
     Args:
-        steps: Target steps (default 10000)
+        steps: Target steps (default 10000, max 65535 — 2-byte protocol limit)
         calories: Target calories (default 500)
         active_min: Target active minutes (default 30)
     """
+    steps = max(0, min(65535, steps))
+    calories = max(0, min(65535, calories))
+    active_min = max(0, min(65535, active_min))
     payload = (
         steps.to_bytes(2, "little")
         + calories.to_bytes(2, "little")

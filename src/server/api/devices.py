@@ -64,7 +64,7 @@ def _get_device(mac: str) -> HuamiDevice:
 # ── Request Models ────────────────────────────────────────────────────
 
 class AuthRequest(BaseModel):
-    auth_key: str
+    auth_key: str = ""
 
 
 class ZeppLoginRequest(BaseModel):
@@ -201,13 +201,15 @@ async def authenticate(mac: str, req: AuthRequest):
     """Authenticate with the device using an auth key."""
     device = _get_device(mac)
 
-    # Save auth key to config
-    config = _load_config()
-    config.setdefault(mac, {})["auth_key"] = req.auth_key
-    _save_config(config)
+    # Update device auth key (only if a new key was provided in the request)
+    if req.auth_key:
+        config = _load_config()
+        config.setdefault(mac, {})["auth_key"] = req.auth_key
+        _save_config(config)
+        device.auth_key = req.auth_key
 
-    # Update device auth key
-    device.auth_key = req.auth_key
+    if not device.auth_key:
+        raise HTTPException(400, "Auth key not set — provide auth_key in request body")
 
     # Connect and authenticate
     if not device.state.connected:
