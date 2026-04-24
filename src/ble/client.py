@@ -63,6 +63,12 @@ class HuamiDevice:
         self._command_lock = asyncio.Lock()
         self._expecting_response = False
 
+        # Effective GATT UUIDs — start from known defaults, may be updated by
+        # _find_huami_chars() on first connect when the device uses different UUIDs.
+        self._notify_uuid: str = HUA_MI_DATA_NOTIFY_UUID
+        self._write_uuid:  str = HUA_MI_DATA_CHAR_UUID
+        self._auth_uuid:   str = HUA_MI_AUTH_CHAR_UUID
+
     @property
     def state(self) -> ConnectionState:
         return self._state
@@ -94,6 +100,84 @@ class HuamiDevice:
         logger.warning(f"Device {self.mac} not found")
         return None
 
+    async def _find_huami_chars(self) -> bool:
+        """Discover and store the actual Huami GATT characteristic UUIDs.
+
+        Strategy:
+        1. Fast path: check that all three known UUIDs exist — use them as-is.
+        2. Discovery path: scan service table for characteristics whose UUID
+           contains the Huami proprietary suffix "3512-2118-0009af100700", then
+           assign roles by BLE properties:
+             - "notify"             → notify/response channel
+             - "write" (lower UUID) → auth channel
+             - "write" (higher UUID)→ command channel
+        3. If mandatory characteristics are missing, set state.error with the
+           full service/characteristic listing for diagnostics.
+
+        Sets self._notify_uuid, self._write_uuid, self._auth_uuid and returns
+        True when the mandatory notify + write pair is available.
+        """
+        _HUAMI_SUFFIX = "3512-2118-0009af100700"
+
+        # Build uuid → properties map from all discovered services
+        char_map: dict[str, list[str]] = {}
+        for service in self._client.services:
+            for char in service.characteristics:
+                char_map[char.uuid.lower()] = list(char.properties)
+
+        logger.debug(f"Device characteristics ({len(char_map)}): {list(char_map)}")
+
+        # Fast path: standard Huami UUIDs present
+        if (HUA_MI_DATA_NOTIFY_UUID.lower() in char_map
+                and HUA_MI_DATA_CHAR_UUID.lower() in char_map
+                and HUA_MI_AUTH_CHAR_UUID.lower() in char_map):
+            logger.info("Standard Huami UUIDs confirmed on device")
+            return True
+
+        # Discovery path: find by UUID suffix
+        huami = {u: p for u, p in char_map.items() if _HUAMI_SUFFIX in u}
+
+        if not huami:
+            all_chars = "\n".join(
+                f"  {u}  props={sorted(p)}" for u, p in sorted(char_map.items())
+            )
+            self._state.error = (
+                "未找到华米特征值（UUID 不含 3512-2118-0009af100700）。\n"
+                "设备上全部特征值：\n" + all_chars
+            )
+            logger.error(self._state.error)
+            return False
+
+        # Assign roles by properties
+        notify_chars = sorted(u for u, p in huami.items() if "notify" in p)
+        write_chars  = sorted(u for u, p in huami.items()
+                              if "write" in p or "write-without-response" in p)
+
+        if not notify_chars or not write_chars:
+            self._state.error = (
+                f"华米特征值不完整（notify={notify_chars}, write={write_chars}）。\n"
+                f"发现的华米特征值: {list(huami)}"
+            )
+            logger.error(self._state.error)
+            return False
+
+        notify_uuid = notify_chars[0]
+        # Lower-numbered UUID = auth, higher = data write (matches 0x0009/0x0010)
+        auth_uuid   = write_chars[0]
+        data_uuid   = write_chars[1] if len(write_chars) >= 2 else write_chars[0]
+
+        if notify_uuid != HUA_MI_DATA_NOTIFY_UUID.lower():
+            logger.info(f"Non-standard notify UUID: {notify_uuid}")
+        if data_uuid != HUA_MI_DATA_CHAR_UUID.lower():
+            logger.info(f"Non-standard data-write UUID: {data_uuid}")
+        if auth_uuid != HUA_MI_AUTH_CHAR_UUID.lower():
+            logger.info(f"Non-standard auth UUID: {auth_uuid}")
+
+        self._notify_uuid = notify_uuid
+        self._write_uuid  = data_uuid
+        self._auth_uuid   = auth_uuid
+        return True
+
     async def connect(self) -> bool:
         """Establish BLE connection to the watch."""
         if self._ble_device is None:
@@ -104,18 +188,19 @@ class HuamiDevice:
 
         logger.info(f"Connecting to {self._ble_device.name or self.mac}...")
 
-        self._client = BleakClient(
-            self._ble_device,
-            timeout=30.0,
-        )
+        self._client = BleakClient(self._ble_device, timeout=30.0)
 
         try:
             await self._client.connect()
 
-            # Set up data notification listener — required for all command responses
-            # and auth flow (watch sends responses via HUA_MI_DATA_NOTIFY_UUID)
+            # Auto-detect actual GATT UUIDs (device may use non-standard values)
+            if not await self._find_huami_chars():
+                self._client = None
+                return False
+
+            # Subscribe to the data notification channel (responses + auth packets)
             await self._client.start_notify(
-                HUA_MI_DATA_NOTIFY_UUID,
+                self._notify_uuid,
                 self._notification_handler,
             )
         except Exception as e:
@@ -124,15 +209,17 @@ class HuamiDevice:
             return False
 
         self._state.connected = True
-        logger.info("BLE connected and notification enabled")
-
+        logger.info(
+            f"BLE connected — notify={self._notify_uuid} "
+            f"write={self._write_uuid} auth={self._auth_uuid}"
+        )
         return True
 
     async def disconnect(self) -> None:
         """Disconnect from the watch."""
         if self._client and self._client.is_connected:
             try:
-                await self._client.stop_notify(HUA_MI_DATA_NOTIFY_UUID)
+                await self._client.stop_notify(self._notify_uuid)
             except Exception:
                 pass
             try:
@@ -143,6 +230,10 @@ class HuamiDevice:
         self._state = ConnectionState()
         self._ble_device = None
         self._client = None
+        # Reset to defaults so next connect re-discovers
+        self._notify_uuid = HUA_MI_DATA_NOTIFY_UUID
+        self._write_uuid  = HUA_MI_DATA_CHAR_UUID
+        self._auth_uuid   = HUA_MI_AUTH_CHAR_UUID
         logger.info("Disconnected")
 
     async def authenticate(self) -> bool:
@@ -185,7 +276,7 @@ class HuamiDevice:
 
         try:
             await self._client.write_gatt_char(
-                HUA_MI_AUTH_CHAR_UUID,
+                self._auth_uuid,
                 auth_packet,
                 response=True,
             )
@@ -235,7 +326,7 @@ class HuamiDevice:
         self._expecting_response = True
 
         await self._client.write_gatt_char(
-            HUA_MI_AUTH_CHAR_UUID,
+            self._auth_uuid,
             confirm_packet,
             response=True,
         )
@@ -289,7 +380,7 @@ class HuamiDevice:
             self._expecting_response = expect_response
 
             await self._client.write_gatt_char(
-                HUA_MI_DATA_CHAR_UUID,
+                self._write_uuid,
                 cmd,
                 response=True,
             )
@@ -328,7 +419,7 @@ class HuamiDevice:
             self._data_buffer.clear()
             self._response_event.clear()
             await self._client.write_gatt_char(
-                HUA_MI_DATA_CHAR_UUID,
+                self._write_uuid,
                 payload,
                 response=True,
             )
