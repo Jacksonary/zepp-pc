@@ -427,18 +427,21 @@ async function openScanModal() {
         const container = document.getElementById("scanModalResults");
 
         if (results.length === 0) {
-            container.innerHTML = `<p class="text-sm text-gray-400 text-center py-4">未发现 Amazfit/Zepp 设备<br><span class="text-xs">请确保手表蓝牙已开启且在附近</span></p>`;
+            container.innerHTML = `<p class="text-sm text-gray-400 text-center py-4">未发现任何蓝牙设备<br><span class="text-xs">请确保手表蓝牙已开启且在附近</span></p>`;
         } else {
-            container.innerHTML = results.map(d => `
-                <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors"
-                     onclick="addFromScan('${safeAttr(d.mac)}')">
-                    <div>
-                        <div class="text-sm font-medium text-gray-800">${escHtml(d.name || "未知设备")}</div>
-                        <div class="text-xs text-gray-400 font-mono">${escHtml(d.mac)}${d.rssi ? ` · ${d.rssi} dBm` : ""}</div>
-                    </div>
-                    <span class="text-xs text-blue-600 font-medium">选择</span>
-                </div>
-            `).join("");
+            const amazfitDevices = results.filter(d => d.is_amazfit);
+            const otherDevices   = results.filter(d => !d.is_amazfit);
+
+            let html = "";
+            if (amazfitDevices.length > 0) {
+                html += `<p class="text-xs text-gray-400 font-medium px-1 mb-1">识别到的 Amazfit/Zepp 设备</p>`;
+                html += amazfitDevices.map(d => _scanDeviceRow(d, true)).join("");
+            }
+            if (otherDevices.length > 0) {
+                html += `<p class="text-xs text-gray-400 font-medium px-1 mt-3 mb-1">其他蓝牙设备（${otherDevices.length} 个，可手动选择）</p>`;
+                html += otherDevices.map(d => _scanDeviceRow(d, false)).join("");
+            }
+            container.innerHTML = html;
         }
         container.classList.remove("hidden");
         document.getElementById("scanModalContent").classList.add("hidden");
@@ -447,6 +450,20 @@ async function openScanModal() {
             <p class="text-sm text-red-500 text-center py-4">扫描失败：${escHtml(e.message)}</p>
             <p class="text-xs text-gray-400 text-center">请确保蓝牙适配器已开启</p>`;
     }
+}
+
+function _scanDeviceRow(d, highlight) {
+    const rssiStr = d.rssi ? ` · ${d.rssi} dBm` : "";
+    const bg = highlight ? "bg-blue-50 hover:bg-blue-100" : "bg-gray-50 hover:bg-gray-100";
+    return `
+        <div class="flex items-center justify-between p-3 ${bg} rounded-lg cursor-pointer transition-colors mb-1"
+             onclick="addFromScan('${safeAttr(d.mac)}')">
+            <div>
+                <div class="text-sm font-medium text-gray-800">${escHtml(d.name || d.mac)}</div>
+                <div class="text-xs text-gray-400 font-mono">${escHtml(d.mac)}${rssiStr}</div>
+            </div>
+            <span class="text-xs ${highlight ? "text-blue-600" : "text-gray-400"} font-medium">选择</span>
+        </div>`;
 }
 
 function closeScanModal() {

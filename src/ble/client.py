@@ -307,25 +307,24 @@ class HuamiDevice:
     async def send_notification_command(self, message: str, title: str = "") -> bool:
         """Push a notification to the watch.
 
-        Notification format (Huami protocol):
-        [cmd=0x01, type=0x01(text), total_len(2), title..., message..., checksum]
+        Huami notification packet:
+          [0x01, 0x01, len_lo, len_hi, title_utf8, 0x00, message_utf8, checksum]
+        The null byte between title and message is required so the watch can
+        split them into separate display fields.
         """
         if not self._client or not self._client.is_connected:
             raise RuntimeError("Not connected")
 
-        msg_bytes = message.encode("utf-8")
-        title_bytes = title.encode("utf-8")
+        title_bytes = title.encode("utf-8") if title else b""
+        msg_bytes   = message.encode("utf-8")
 
-        # Build packet: [cmd=0x01, type=0x01(text), total_len(2), title..., message..., checksum]
-        full_text = title_bytes + msg_bytes
-        raw_payload = bytes([0x01, 0x01]) + len(full_text).to_bytes(2, "little")
-        raw_payload += full_text
-        # Add checksum
+        # Separator is only added when there is a title
+        body = (title_bytes + b"\x00" + msg_bytes) if title_bytes else msg_bytes
+        raw_payload = bytes([0x01, 0x01]) + len(body).to_bytes(2, "little") + body
         checksum = sum(raw_payload) & 0xFF
         payload = raw_payload + bytes([checksum])
 
         async with self._command_lock:
-            # Drain any stale data that may have arrived from unsolicited notifications
             self._data_buffer.clear()
             self._response_event.clear()
             await self._client.write_gatt_char(
@@ -382,50 +381,46 @@ class HuamiDevice:
 
 
 async def scan_for_amazfit_devices(name_pattern: str = "", timeout: float = 8.0) -> list[dict]:
-    """Scan for Amazfit/Zepp BLE devices without needing a device instance.
+    """Scan for nearby BLE devices.
 
-    On Windows, BleakScanner must run in a fresh event loop to avoid WinRT
-    conflicts with the uvicorn event loop. We spawn it in a thread executor.
+    Returns ALL discovered devices sorted so known Amazfit/Zepp models come first.
+    This lets the user select their watch even if the BLE broadcast name is unexpected.
+
+    On Windows, Python 3.12 uvicorn already runs on ProactorEventLoop which bleak's
+    WinRT backend requires. Run directly in the current event loop — do NOT use
+    run_in_executor with a new loop, because WinRT BLEDevice objects are COM-apartment-
+    threaded and must be used on the loop that created them.
     """
-    _known_prefixes = ("amazfit", "t-rex", "gtr", "gts", "zepp", "bip", "band")
-    logger.info("Scanning for Amazfit/Zepp devices...")
+    _known_prefixes = ("amazfit", "t-rex", "gtr", "gts", "zepp", "bip", "band", "trex")
+    logger.info("Scanning for BLE devices...")
 
-    def _run_scan() -> list:
-        import asyncio as _asyncio
-        async def _inner():
-            return await BleakScanner.discover(timeout=timeout)
-        # On Windows, create a dedicated event loop in the thread
-        loop = _asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(_inner())
-        finally:
-            loop.close()
-
-    try:
-        if sys.platform == "win32":
-            # Run in executor to avoid WinRT/asyncio event loop conflicts
-            loop = asyncio.get_event_loop()
-            raw_devices = await loop.run_in_executor(None, _run_scan)
-        else:
-            raw_devices = await BleakScanner.discover(timeout=timeout)
-    except Exception as e:
-        logger.error(f"BLE scan failed: {e}")
-        raise
+    raw_devices = await BleakScanner.discover(timeout=timeout)
 
     results = []
     for d in raw_devices:
         name = d.name or ""
         name_lower = name.lower()
-        if name_pattern:
-            match = name_pattern.lower() in name_lower
-        else:
-            match = any(p in name_lower for p in _known_prefixes)
-        if match:
-            results.append({
-                "name": name,
-                "mac": d.address,
-                "rssi": d.rssi if hasattr(d, "rssi") else None,
-            })
-            logger.info(f"  Found: {name} ({d.address})")
 
+        if name_pattern:
+            is_match = name_pattern.lower() in name_lower
+        else:
+            is_match = any(p in name_lower for p in _known_prefixes)
+
+        # Collect RSSI — bleak 0.22+ moved it to AdvertisementData,
+        # but BLEDevice.rssi still exists as a convenience property in most versions.
+        rssi = getattr(d, "rssi", None)
+
+        results.append({
+            "name":       name or d.address,
+            "mac":        d.address,
+            "rssi":       rssi,
+            "is_amazfit": is_match,
+        })
+        if is_match:
+            logger.info(f"  Amazfit device: {name} ({d.address})")
+
+    # Sort: known Amazfit devices first, then by RSSI descending (signal strength)
+    results.sort(key=lambda x: (0 if x["is_amazfit"] else 1, -(x["rssi"] or -100)))
+    logger.info(f"Scan complete: {len(results)} total, "
+                f"{sum(1 for r in results if r['is_amazfit'])} Amazfit/Zepp")
     return results

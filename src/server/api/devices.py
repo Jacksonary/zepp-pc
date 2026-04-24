@@ -153,16 +153,18 @@ async def list_devices():
     result = []
     for mac, device in _devices.items():
         state = device.state
+        # Prefer live device_info name, fall back to saved name in config, then MAC
+        saved_name = config.get(mac, {}).get("name", mac)
         result.append({
-            "mac": mac,
-            "name": state.device_info.name if state.device_info else mac,
-            "connected": state.connected,
+            "mac":           mac,
+            "name":          state.device_info.name if state.device_info else saved_name,
+            "connected":     state.connected,
             "authenticated": state.authenticated,
-            "battery": state.device_info.battery_level if state.device_info else None,
-            "model": state.device_info.model if state.device_info else "",
-            "firmware": state.device_info.firmware_version if state.device_info else "",
-            "error": state.error,
-            "saved_key": mac in config,
+            "battery":       state.device_info.battery_level if state.device_info else None,
+            "model":         state.device_info.model if state.device_info else "",
+            "firmware":      state.device_info.firmware_version if state.device_info else "",
+            "error":         state.error,
+            "saved_key":     bool(config.get(mac, {}).get("auth_key")),
         })
     return result
 
@@ -339,55 +341,63 @@ async def get_device_info(mac: str):
 @router.get("/devices/{mac}/sync")
 async def sync_device(mac: str):
     """Sync all available data from device."""
+    import asyncio as _asyncio
     device = _get_device(mac)
     if not device.state.connected:
         raise HTTPException(400, "Not connected")
 
     results = {}
 
-    # Battery
-    try:
-        results["battery"] = await device.read_battery()
-    except Exception as e:
-        results["battery"] = None
-        logger.warning(f"Battery read failed: {e}")
+    async def _do_sync():
+        # Battery (GATT read, fast)
+        try:
+            results["battery"] = await device.read_battery()
+        except Exception as e:
+            results["battery"] = None
+            logger.warning(f"Battery read failed: {e}")
 
-    # Steps
-    try:
-        resp = await device.send_command(cmds.get_steps_cmd())
-        results["steps"] = cmds.parse_steps_response(resp) if resp else None
-    except Exception as e:
-        results["steps"] = None
-        logger.warning(f"Steps read failed: {e}")
+        # Steps
+        try:
+            resp = await device.send_command(cmds.get_steps_cmd())
+            results["steps"] = cmds.parse_steps_response(resp) if resp else None
+        except Exception as e:
+            results["steps"] = None
+            logger.warning(f"Steps read failed: {e}")
 
-    # Heart rate
-    try:
-        resp = await device.send_command(cmds.get_heart_rate_cmd())
-        results["heart_rate"] = cmds.parse_heart_rate_response(resp) if resp else None
-    except Exception as e:
-        results["heart_rate"] = None
-        logger.warning(f"Heart rate read failed: {e}")
+        # Heart rate
+        try:
+            resp = await device.send_command(cmds.get_heart_rate_cmd())
+            results["heart_rate"] = cmds.parse_heart_rate_response(resp) if resp else None
+        except Exception as e:
+            results["heart_rate"] = None
+            logger.warning(f"Heart rate read failed: {e}")
 
-    # SpO2
-    try:
-        resp = await device.send_command(cmds.get_spo2_cmd())
-        results["spo2"] = cmds.parse_spo2_response(resp) if resp else None
-    except Exception as e:
-        results["spo2"] = None
-        logger.warning(f"SpO2 read failed: {e}")
+        # SpO2
+        try:
+            resp = await device.send_command(cmds.get_spo2_cmd())
+            results["spo2"] = cmds.parse_spo2_response(resp) if resp else None
+        except Exception as e:
+            results["spo2"] = None
+            logger.warning(f"SpO2 read failed: {e}")
 
-    # Device info
+        # Device info (GATT reads, fast)
+        try:
+            info = await device.read_device_info()
+            results["device_info"] = {
+                "model":    info.model,
+                "firmware": info.firmware_version,
+                "serial":   info.serial_number,
+                "hardware": info.hardware_version,
+            }
+        except Exception as e:
+            results["device_info"] = None
+            logger.warning(f"Device info read failed: {e}")
+
+    # Cap total sync at 30 seconds to avoid UI appearing frozen
     try:
-        info = await device.read_device_info()
-        results["device_info"] = {
-            "model": info.model,
-            "firmware": info.firmware_version,
-            "serial": info.serial_number,
-            "hardware": info.hardware_version,
-        }
-    except Exception as e:
-        results["device_info"] = None
-        logger.warning(f"Device info read failed: {e}")
+        await _asyncio.wait_for(_do_sync(), timeout=30.0)
+    except _asyncio.TimeoutError:
+        logger.warning("Sync timed out after 30s")
 
     return results
 
