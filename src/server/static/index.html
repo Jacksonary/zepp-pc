@@ -128,7 +128,49 @@
     <!-- Toast -->
     <div id="toast" class="hidden fixed bottom-6 right-6 bg-gray-800 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg z-50 fade-in max-w-xs"></div>
 
-    <!-- ── Auth Key Modal (fallback for manually-added devices) ── -->
+    <!-- ── Auto-Auth Modal (fetch auth key from Zepp cloud automatically) ── -->
+    <div id="autoAuthModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-lg p-6 w-[420px] max-w-full mx-4 fade-in">
+            <div class="flex items-center justify-between mb-1">
+                <h3 class="text-lg font-semibold text-gray-800">通过 Zepp 账号认证</h3>
+                <button onclick="closeAutoAuthModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">登录 Zepp/Amazfit 账号，自动获取该设备的认证密钥并完成认证，无需手动操作。</p>
+            <div class="space-y-3 mb-4">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">邮箱</label>
+                    <input id="autoAuthEmail" type="email" placeholder="your@email.com" autocomplete="email"
+                           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">密码</label>
+                    <input id="autoAuthPassword" type="password" placeholder="Zepp App 登录密码" autocomplete="current-password"
+                           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">账号区域</label>
+                    <select id="autoAuthRegion" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        <option value="international">国际版（amazfit.com）</option>
+                        <option value="cn">中国大陆版（zepp.com）</option>
+                    </select>
+                </div>
+            </div>
+            <div id="autoAuthError" class="hidden mb-3 p-2 bg-red-50 text-red-600 text-xs rounded-lg"></div>
+            <div class="flex items-center justify-between">
+                <button onclick="openAuthModal(currentAutoAuthMac); closeAutoAuthModal()"
+                        class="text-xs text-gray-400 hover:text-gray-600">手动输入密钥</button>
+                <div class="flex gap-2">
+                    <button onclick="closeAutoAuthModal()" class="text-gray-500 hover:text-gray-700 text-sm px-4 py-2">取消</button>
+                    <button onclick="submitAutoAuth()" id="autoAuthBtn"
+                            class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2 rounded-lg flex items-center gap-2">
+                        <span id="autoAuthBtnText">获取并认证</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Auth Key Modal (manual fallback) ── -->
     <div id="authModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
         <div class="bg-white rounded-xl shadow-lg p-6 w-[420px] max-w-full mx-4 fade-in">
             <h3 class="text-lg font-semibold text-gray-800 mb-1">输入 Auth Key</h3>

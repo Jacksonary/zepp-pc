@@ -3,12 +3,14 @@
 Uses the current two-step Zepp API (as of 2024/2025):
   Step 1: POST AES-CBC-encrypted credentials → get access_token (303 redirect)
   Step 2: POST access_token → get app_token + user_id
-  Step 3: GET devices with app_token
+  Step 3: GET devices with app_token + required query params
 
-Reference: https://github.com/argrento/huami-token (zepp.py + constants.py)
+Reference: https://github.com/argrento/huami-token (zepp.py + constants.py + models.py)
 """
 
+import json
 import logging
+import secrets
 import urllib.parse
 import uuid
 
@@ -53,11 +55,22 @@ _HEADERS_LOGIN = {
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
 }
 
-# Step 3: Device list headers — GET request, no Content-Type or origin needed
+# Step 3: Device list headers (all required by the server)
 _HEADERS_DEVICES = {
-    "app_name":   "com.huami.midong",
-    "appname":    "com.huami.midong",
-    "User-Agent": "Zepp/9.12.5 (Pixel 4; Android 12; Density/2.75)",
+    "hm-privacy-diagnostics": "false",
+    "hm-privacy-ceip":        "true",
+    "country":                "US",
+    "appplatform":            "android_phone",
+    "timezone":               "Europe/London",
+    "channel":                "a100900101016",
+    "vb":                     "202509151347",
+    "cv":                     "151689_9.12.5",
+    "appname":                "com.huami.midong",
+    "v":                      "2.0",
+    "vn":                     "9.12.5",
+    "lang":                   "en_US",
+    "User-Agent":             "Zepp/9.12.5 (Pixel 4; Android 12; Density/2.75)",
+    "Accept-Encoding":        "gzip",
 }
 
 
@@ -68,6 +81,36 @@ def _encrypt_payload(data: bytes) -> bytes:
     cipher = Cipher(algorithms.AES(_ENC_KEY), modes.CBC(_ENC_IV))
     encryptor = cipher.encryptor()
     return encryptor.update(padded) + encryptor.finalize()
+
+
+def _parse_auth_key(d: dict) -> str:
+    """Extract auth_key from a device dict.
+
+    The Zepp API buries the auth_key inside an 'additionalInfo' field that is
+    itself a JSON-encoded string:
+      {"additionalInfo": "{\"auth_key\": \"aabbccdd...\", ...}", ...}
+
+    Fall back to top-level field names used by older API versions.
+    """
+    # Primary: nested JSON string in additionalInfo (current API)
+    additional_info_str = d.get("additionalInfo") or d.get("additional_info")
+    if additional_info_str:
+        try:
+            additional_info = json.loads(additional_info_str)
+            key = additional_info.get("auth_key") or additional_info.get("hmac")
+            if key:
+                return key
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Fallbacks: top-level fields used by older / alternate API versions
+    return (
+        d.get("hmac")
+        or d.get("auth_key")
+        or d.get("deviceKey")
+        or d.get("authKey")
+        or ""
+    )
 
 
 async def get_devices_from_zepp(email: str, password: str, region: str = "international") -> list[dict]:
@@ -159,11 +202,33 @@ async def get_devices_from_zepp(email: str, password: str, region: str = "intern
             raise ValueError(f"登录失败：{msg}")
 
         # ── Step 3: Fetch device list ─────────────────────────────────
-        # Use dedicated GET headers — do NOT reuse _HEADERS_LOGIN which carries
-        # Content-Type: form-urlencoded and origin, both inappropriate for a GET.
+        # Required query params (from huami-token URL_PARAMS.ZEPP_DEVICES):
+        # r, userid, appid are dynamic; the rest are fixed config values.
+        req_id = str(uuid.uuid4())
+        params3 = {
+            "r":                        [req_id, req_id],
+            "enableMultiDeviceOnMultiType": ["true", "true"],
+            "userid":                   user_id,
+            "appid":                    str(secrets.randbits(64)),
+            "channel":                  "a100900101016",
+            "country":                  "US",
+            "cv":                       "151689_9.12.5",
+            "device":                   "android_32",
+            "device_type":              "android_phone",
+            "enableMultiDevice":        "true",
+            "lang":                     "en_US",
+            "timezone":                 "Europe/London",
+            "v":                        "2.0",
+        }
+
         resp3 = await client.get(
             _URL_DEVICES.format(user_id=user_id),
-            headers={**_HEADERS_DEVICES, "apptoken": app_token},
+            params=params3,
+            headers={
+                **_HEADERS_DEVICES,
+                "x-request-id": req_id,
+                "apptoken":     app_token,
+            },
         )
 
         if resp3.status_code != 200:
@@ -174,6 +239,7 @@ async def get_devices_from_zepp(email: str, password: str, region: str = "intern
             raise ValueError(f"获取设备列表失败（HTTP {resp3.status_code}）：{body}")
 
         payload = resp3.json()
+        logger.info(f"Device list response keys: {list(payload.keys()) if isinstance(payload, dict) else 'list'}")
 
         # "items" is the canonical key; use explicit presence check so an empty
         # list [] (no devices bound) is handled correctly and not shadowed by `or`.
@@ -184,14 +250,24 @@ async def get_devices_from_zepp(email: str, password: str, region: str = "intern
         else:
             devices_raw = payload.get("devices", [])
 
+        logger.info(f"Raw device count: {len(devices_raw)}")
+
         result = []
         for d in devices_raw:
             mac      = d.get("macAddress") or d.get("mac_address") or d.get("deviceMacAddress")
-            auth_key = d.get("hmac")       or d.get("auth_key")    or d.get("deviceKey")
-            name     = d.get("deviceName") or d.get("name")        or "Unknown Device"
-            if mac and auth_key:
-                mac      = mac.upper().replace("-", ":")
-                auth_key = auth_key.replace(" ", "").lower()
-                result.append({"mac": mac, "name": name, "auth_key": auth_key})
+            auth_key = _parse_auth_key(d)
+            name     = d.get("deviceName") or d.get("name") or "Unknown Device"
+
+            if not mac:
+                logger.warning(f"Device missing MAC, skipping: {list(d.keys())}")
+                continue
+            if not auth_key:
+                logger.warning(f"Device {mac} missing auth_key, fields: {list(d.keys())}")
+                continue
+
+            mac      = mac.upper().replace("-", ":")
+            auth_key = auth_key.replace(" ", "").lower()
+            result.append({"mac": mac, "name": name, "auth_key": auth_key})
+            logger.info(f"Device imported: {name} ({mac})")
 
         return result

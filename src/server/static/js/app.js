@@ -205,16 +205,15 @@ function renderDeviceCard(d) {
             </button>
         </div>` : `
         <div class="flex flex-wrap gap-2">
-            ${!isConnected ? `
-            <button onclick="${d.saved_key ? `connectAndAuth('${safeAttr(mac)}')` : `connectDevice('${safeAttr(mac)}')`}"
+            ${d.saved_key ? `
+            <button onclick="connectAndAuth('${safeAttr(mac)}')"
                     class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">
-                ${d.saved_key ? "连接并认证" : "连接"}
-            </button>` : ""}
-            ${isConnected ? `
-            <button onclick="openAuthModal('${safeAttr(mac)}')"
+                连接并认证
+            </button>` : `
+            <button onclick="openAutoAuthModal('${safeAttr(mac)}')"
                     class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">
-                输入 Auth Key 认证
-            </button>` : ""}
+                Zepp 账号认证
+            </button>`}
             <button onclick="removeDevice('${safeAttr(mac)}')"
                     class="bg-red-50 hover:bg-red-100 text-red-600 text-xs px-3 py-1.5 rounded-lg transition-colors ml-auto">
                 移除
@@ -370,6 +369,54 @@ async function syncTime(mac) {
     } catch (e) {
         toast("同步失败：" + e.message);
     }
+}
+
+// ── Auto-Auth Modal (Zepp account → auto-fetch key) ──────────────────
+
+let currentAutoAuthMac = null;
+
+function openAutoAuthModal(mac) {
+    currentAutoAuthMac = mac;
+    document.getElementById("autoAuthEmail").value = "";
+    document.getElementById("autoAuthPassword").value = "";
+    document.getElementById("autoAuthError").classList.add("hidden");
+    document.getElementById("autoAuthModal").classList.remove("hidden");
+    document.getElementById("autoAuthEmail").focus();
+}
+
+function closeAutoAuthModal() {
+    currentAutoAuthMac = null;
+    document.getElementById("autoAuthModal").classList.add("hidden");
+}
+
+async function submitAutoAuth() {
+    const email    = document.getElementById("autoAuthEmail").value.trim();
+    const password = document.getElementById("autoAuthPassword").value;
+    const region   = document.getElementById("autoAuthRegion").value;
+    const errEl    = document.getElementById("autoAuthError");
+    errEl.classList.add("hidden");
+
+    if (!email || !password) {
+        errEl.textContent = "请填写邮箱和密码";
+        errEl.classList.remove("hidden");
+        return;
+    }
+
+    setLoading("autoAuthBtn", "autoAuthBtnText", true, "获取中...");
+    try {
+        await api(`/devices/${currentAutoAuthMac}/zepp_auth`, {
+            method: "POST",
+            body: JSON.stringify({ email, password, region }),
+        });
+        document.getElementById("autoAuthPassword").value = "";
+        closeAutoAuthModal();
+        toast("认证成功");
+        await loadDevices();
+    } catch (e) {
+        errEl.textContent = e.message;
+        errEl.classList.remove("hidden");
+    }
+    setLoading("autoAuthBtn", "autoAuthBtnText", false, "获取并认证");
 }
 
 // ── Auth Modal ────────────────────────────────────────────────────────
@@ -614,6 +661,7 @@ async function submitGoal() {
 
 document.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
+    closeAutoAuthModal();
     closeAuthModal();
     closeScanModal();
     closeNotifyModal();

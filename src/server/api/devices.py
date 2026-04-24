@@ -198,6 +198,68 @@ async def get_device(mac: str):
     }
 
 
+@router.post("/devices/{mac}/zepp_auth")
+async def zepp_auth_device(mac: str, req: ZeppLoginRequest):
+    """Fetch auth key for this device from Zepp cloud, then connect and authenticate.
+
+    Eliminates the need for users to manually obtain or paste an auth key.
+    """
+    from src.server.api.zepp import get_devices_from_zepp
+    try:
+        cloud_devices = await get_devices_from_zepp(req.email, req.password, req.region)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Zepp auth fetch error: {e}")
+        raise HTTPException(500, f"网络错误：{e}")
+
+    def _norm(m: str) -> str:
+        return m.upper().replace("-", "").replace(":", "")
+
+    matching = next((d for d in cloud_devices if _norm(d["mac"]) == _norm(mac)), None)
+    if not matching:
+        found_macs = [d["mac"] for d in cloud_devices]
+        raise HTTPException(
+            404,
+            f"该 Zepp 账号下未找到此设备（{mac}）。"
+            f"账号下共 {len(found_macs)} 台设备：{', '.join(found_macs) or '无'}",
+        )
+
+    # Persist auth key
+    device = _get_device(mac)
+    device.auth_key = matching["auth_key"]
+    config = _load_config()
+    config.setdefault(mac, {})["auth_key"] = matching["auth_key"]
+    config[mac]["name"] = matching["name"]
+    _save_config(config)
+
+    # Connect (if not already) then authenticate
+    if not device.state.connected:
+        success = await device.connect()
+        if not success:
+            raise HTTPException(400, device.state.error or "连接失败")
+
+    success = await device.authenticate()
+    if not success:
+        raise HTTPException(401, device.state.error or "认证失败")
+
+    try:
+        await device.read_device_info()
+        await device.read_battery()
+    except Exception as e:
+        logger.warning(f"Post-auth info read failed: {e}")
+
+    return {
+        "authenticated": True,
+        "device_info": {
+            "name":     device.state.device_info.name if device.state.device_info else matching["name"],
+            "model":    device.state.device_info.model if device.state.device_info else "",
+            "firmware": device.state.device_info.firmware_version if device.state.device_info else "",
+            "battery":  device.state.device_info.battery_level if device.state.device_info else None,
+        },
+    }
+
+
 @router.post("/devices/{mac}/auth")
 async def authenticate(mac: str, req: AuthRequest):
     """Authenticate with the device using an auth key."""
