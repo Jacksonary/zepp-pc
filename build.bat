@@ -22,10 +22,11 @@ pip install --quiet uv
 
 echo.
 echo Installing project dependencies...
-uv pip install -e ".[dev]" pyinstaller
+uv pip install -e ".[dev,gui]" pyinstaller
 
 echo.
 echo Running tests...
+set PYTHONPATH=.
 pytest tests/ -v
 if errorlevel 1 (
     echo Tests failed! Aborting build.
@@ -34,6 +35,8 @@ if errorlevel 1 (
 
 echo.
 echo Building executable...
+set PYTHONPATH=.
+set ZEPP_PC_CONSOLE=0
 pyinstaller build.spec --clean
 
 echo.

@@ -452,17 +452,61 @@ async function openScanModal() {
     }
 }
 
+function _rssiBar(rssi) {
+    if (rssi === null || rssi === undefined) return "";
+    // Three filled/empty blocks as signal strength visual (●=filled ○=empty)
+    let color, bars;
+    if      (rssi >= -60) { color = "text-green-600";  bars = "●●●"; }
+    else if (rssi >= -70) { color = "text-yellow-500"; bars = "●●○"; }
+    else if (rssi >= -80) { color = "text-orange-500"; bars = "●○○"; }
+    else                  { color = "text-red-500";    bars = "○○○"; }
+    const label = d => d.signal || "";
+    return `<span class="${color} font-mono text-xs" title="${rssi} dBm">${bars}</span>`
+         + `<span class="text-xs text-gray-400">${rssi} dBm</span>`;
+}
+
 function _scanDeviceRow(d, highlight) {
-    const rssiStr = d.rssi ? ` · ${d.rssi} dBm` : "";
-    const bg = highlight ? "bg-blue-50 hover:bg-blue-100" : "bg-gray-50 hover:bg-gray-100";
+    const bg = highlight
+        ? "bg-blue-50 hover:bg-blue-100 border border-blue-200"
+        : "bg-gray-50 hover:bg-gray-100 border border-gray-100";
+
+    // Signal strength visual
+    let sigHtml = "";
+    if (d.rssi !== null && d.rssi !== undefined) {
+        let color, bars;
+        if      (d.rssi >= -60) { color = "text-green-600";  bars = "●●●"; }
+        else if (d.rssi >= -70) { color = "text-yellow-500"; bars = "●●○"; }
+        else if (d.rssi >= -80) { color = "text-orange-500"; bars = "●○○"; }
+        else                    { color = "text-red-500";    bars = "○○○"; }
+        const signalText = d.signal ? `${d.signal}` : "";
+        sigHtml = `<span class="${color} font-mono text-xs" title="${d.rssi} dBm">${bars}</span>`
+                + `<span class="text-xs text-gray-400 ml-0.5">${d.rssi} dBm`
+                + (signalText ? ` · ${signalText}` : "")
+                + `</span>`;
+    }
+
+    // Amazfit/Zepp type badge
+    const badge = highlight
+        ? `<span class="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">Amazfit/Zepp</span>`
+        : "";
+
     return `
-        <div class="flex items-center justify-between p-3 ${bg} rounded-lg cursor-pointer transition-colors mb-1"
+        <div class="flex items-center gap-3 p-3 ${bg} rounded-lg cursor-pointer transition-colors mb-1.5"
              onclick="addFromScan('${safeAttr(d.mac)}')">
-            <div>
-                <div class="text-sm font-medium text-gray-800">${escHtml(d.name || d.mac)}</div>
-                <div class="text-xs text-gray-400 font-mono">${escHtml(d.mac)}${rssiStr}</div>
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5 mb-1 flex-wrap">
+                    <span class="text-sm font-semibold text-gray-800">${escHtml(d.name)}</span>
+                    ${badge}
+                </div>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-xs text-gray-400 font-mono">${escHtml(d.mac)}</span>
+                    ${sigHtml}
+                </div>
             </div>
-            <span class="text-xs ${highlight ? "text-blue-600" : "text-gray-400"} font-medium">选择</span>
+            <svg class="w-4 h-4 flex-shrink-0 ${highlight ? "text-blue-400" : "text-gray-300"}"
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
         </div>`;
 }
 

@@ -46,7 +46,7 @@ elif _is_mac:
 
 a = Analysis(
     [str(project_root / "main.py")],
-    pathex=[],
+    pathex=[str(project_root)],
     binaries=[],
     datas=[
         (str(project_root / "src" / "server" / "static"), "src/server/static"),

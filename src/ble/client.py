@@ -381,46 +381,80 @@ class HuamiDevice:
 
 
 async def scan_for_amazfit_devices(name_pattern: str = "", timeout: float = 8.0) -> list[dict]:
-    """Scan for nearby BLE devices.
+    """Scan for nearby BLE devices, returning all with rich metadata.
 
-    Returns ALL discovered devices sorted so known Amazfit/Zepp models come first.
-    This lets the user select their watch even if the BLE broadcast name is unexpected.
+    Uses return_adv=True (bleak 3.x) to get AdvertisementData per device,
+    which provides real RSSI readings, manufacturer data (company ID), and
+    advertised service UUIDs — enabling reliable Amazfit/Zepp identification
+    even when the broadcast name is unusual or empty.
 
-    On Windows, Python 3.12 uvicorn already runs on ProactorEventLoop which bleak's
-    WinRT backend requires. Run directly in the current event loop — do NOT use
-    run_in_executor with a new loop, because WinRT BLEDevice objects are COM-apartment-
-    threaded and must be used on the loop that created them.
+    Returns ALL discovered devices sorted: Amazfit/Zepp first, then by signal
+    strength descending. Includes human-readable signal label and type hint.
     """
     _known_prefixes = ("amazfit", "t-rex", "gtr", "gts", "zepp", "bip", "band", "trex")
+
+    # Huami Information Technology Co., Ltd. — Bluetooth SIG company ID 0x0157
+    _HUAMI_COMPANY_ID = 0x0157
+
+    # Service UUIDs that Huami/Amazfit devices advertise during discovery
+    _HUAMI_SERVICE_UUIDS = {
+        "0000fee0-0000-1000-8000-00805f9b34fb",  # Huami proprietary (main)
+        "0000fee1-0000-1000-8000-00805f9b34fb",  # Huami proprietary (secondary)
+    }
+
     logger.info("Scanning for BLE devices...")
 
-    raw_devices = await BleakScanner.discover(timeout=timeout)
+    # return_adv=True → dict[addr, tuple[BLEDevice, AdvertisementData]]
+    # AdvertisementData carries: rssi (int), manufacturer_data (dict[int,bytes]),
+    # service_uuids (list[str]), local_name (str|None), tx_power (int|None)
+    raw = await BleakScanner.discover(timeout=timeout, return_adv=True)
 
     results = []
-    for d in raw_devices:
-        name = d.name or ""
+    for addr, (device, adv) in raw.items():
+        # local_name from advertisement is more reliable than cached BLEDevice.name
+        name = adv.local_name or device.name or ""
         name_lower = name.lower()
+        rssi = adv.rssi  # always int with return_adv=True
 
+        # Three-source identification:
+        # 1. Huami company ID in manufacturer data
+        # 2. Known Huami service UUID in advertisement
+        # 3. Device name prefix match
+        has_huami_mfr = _HUAMI_COMPANY_ID in adv.manufacturer_data
+        has_huami_svc = bool(
+            {s.lower() for s in adv.service_uuids} & _HUAMI_SERVICE_UUIDS
+        )
         if name_pattern:
-            is_match = name_pattern.lower() in name_lower
+            name_match = name_pattern.lower() in name_lower
         else:
-            is_match = any(p in name_lower for p in _known_prefixes)
+            name_match = any(p in name_lower for p in _known_prefixes)
 
-        # Collect RSSI — bleak 0.22+ moved it to AdvertisementData,
-        # but BLEDevice.rssi still exists as a convenience property in most versions.
-        rssi = getattr(d, "rssi", None)
+        is_amazfit = has_huami_mfr or has_huami_svc or name_match
+
+        # Human-readable signal strength
+        if rssi >= -60:
+            signal = "极强"
+        elif rssi >= -70:
+            signal = "强"
+        elif rssi >= -80:
+            signal = "弱"
+        else:
+            signal = "极弱"
 
         results.append({
-            "name":       name or d.address,
-            "mac":        d.address,
+            "name":       name or addr,
+            "mac":        addr,
             "rssi":       rssi,
-            "is_amazfit": is_match,
+            "signal":     signal,
+            "is_amazfit": is_amazfit,
         })
-        if is_match:
-            logger.info(f"  Amazfit device: {name} ({d.address})")
+        if is_amazfit:
+            logger.info(f"  Amazfit device: {name or addr} ({addr}) RSSI={rssi} dBm")
 
-    # Sort: known Amazfit devices first, then by RSSI descending (signal strength)
-    results.sort(key=lambda x: (0 if x["is_amazfit"] else 1, -(x["rssi"] or -100)))
-    logger.info(f"Scan complete: {len(results)} total, "
-                f"{sum(1 for r in results if r['is_amazfit'])} Amazfit/Zepp")
+    # Amazfit/Zepp devices first, then by RSSI descending within each group
+    results.sort(key=lambda x: (0 if x["is_amazfit"] else 1, -x["rssi"]))
+    logger.info(
+        f"Scan complete: {len(results)} total, "
+        f"{sum(1 for r in results if r['is_amazfit'])} Amazfit/Zepp"
+    )
     return results

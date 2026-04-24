@@ -22,11 +22,11 @@ uv pip install pyinstaller
 
 echo ""
 echo "Running tests..."
-pytest tests/ -v
+PYTHONPATH=. pytest tests/ -v
 
 echo ""
 echo "Building executable..."
-pyinstaller build.spec --clean
+PYTHONPATH=. ZEPP_PC_CONSOLE=0 pyinstaller build.spec --clean
 
 echo ""
 echo "========================================"

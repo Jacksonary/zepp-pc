@@ -29,7 +29,7 @@ _URL_DEVICES     = "https://api-mifit.zepp.com/users/{user_id}/devices"
 _ENC_KEY = b"xeNtBVqzDc6tuNTh"
 _ENC_IV  = b"MAAAYAAAAAAAAABg"
 
-# All 11 required headers for Step 1 (missing any → 400 Bad Request)
+# Step 1: All 11 required headers (missing any → 400 Bad Request from server)
 _HEADERS_TOKENS = {
     "app_name":        "com.huami.midong",
     "appname":         "com.huami.midong",
@@ -44,12 +44,20 @@ _HEADERS_TOKENS = {
     "Accept-Encoding": "gzip",
 }
 
+# Step 2: Login headers
 _HEADERS_LOGIN = {
     "app_name":     "com.huami.midong",
     "appname":      "com.huami.midong",
     "User-Agent":   "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
     "origin":       "https://user.zepp.com",
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+}
+
+# Step 3: Device list headers — GET request, no Content-Type or origin needed
+_HEADERS_DEVICES = {
+    "app_name":   "com.huami.midong",
+    "appname":    "com.huami.midong",
+    "User-Agent": "Zepp/9.12.5 (Pixel 4; Android 12; Density/2.75)",
 }
 
 
@@ -71,7 +79,7 @@ async def get_devices_from_zepp(email: str, password: str, region: str = "intern
     async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
 
         # ── Step 1: Encrypted credential exchange → access_token ──────
-        # token must be a list so urlencode(doseq=True) emits token=access&token=refresh
+        # token must be a list: urlencode(doseq=True) emits token=access&token=refresh
         raw_payload = urllib.parse.urlencode({
             "emailOrPhone": email,
             "password":     password,
@@ -117,19 +125,19 @@ async def get_devices_from_zepp(email: str, password: str, region: str = "intern
         resp2 = await client.post(
             url_login,
             data={
-                "code":              access_token,
-                "device_id":         str(uuid.uuid4()),
-                "device_model":      "android_phone",
-                "app_version":       "9.12.5",
-                "dn":                "api-mifit.zepp.com,api-user.zepp.com,api-watch.zepp.com",
-                "third_name":        "huami",
-                "source":            "com.huami.watch.hmwatchmanager:9.12.5:151689",
-                "app_name":          "com.huami.midong",
-                "country_code":      "US",
-                "grant_type":        "access_token",
-                "allow_registration":"false",
-                "lang":              "en",
-                "countryState":      "US-NY",
+                "code":               access_token,
+                "device_id":          str(uuid.uuid4()),
+                "device_model":       "android_phone",
+                "app_version":        "9.12.5",
+                "dn":                 "api-mifit.zepp.com,api-user.zepp.com,api-watch.zepp.com",
+                "third_name":         "huami",
+                "source":             "com.huami.watch.hmwatchmanager:9.12.5:151689",
+                "app_name":           "com.huami.midong",
+                "country_code":       "US",
+                "grant_type":         "access_token",
+                "allow_registration": "false",
+                "lang":               "en",
+                "countryState":       "US-NY",
             },
             headers=_HEADERS_LOGIN,
         )
@@ -151,17 +159,30 @@ async def get_devices_from_zepp(email: str, password: str, region: str = "intern
             raise ValueError(f"登录失败：{msg}")
 
         # ── Step 3: Fetch device list ─────────────────────────────────
+        # Use dedicated GET headers — do NOT reuse _HEADERS_LOGIN which carries
+        # Content-Type: form-urlencoded and origin, both inappropriate for a GET.
         resp3 = await client.get(
             _URL_DEVICES.format(user_id=user_id),
-            headers={**_HEADERS_LOGIN, "apptoken": app_token},
+            headers={**_HEADERS_DEVICES, "apptoken": app_token},
         )
-        resp3.raise_for_status()
+
+        if resp3.status_code != 200:
+            try:
+                body = resp3.json()
+            except Exception:
+                body = resp3.text[:300]
+            raise ValueError(f"获取设备列表失败（HTTP {resp3.status_code}）：{body}")
+
         payload = resp3.json()
 
-        devices_raw = (
-            payload.get("items")
-            or (payload if isinstance(payload, list) else payload.get("devices", []))
-        )
+        # "items" is the canonical key; use explicit presence check so an empty
+        # list [] (no devices bound) is handled correctly and not shadowed by `or`.
+        if "items" in payload:
+            devices_raw = payload["items"]
+        elif isinstance(payload, list):
+            devices_raw = payload
+        else:
+            devices_raw = payload.get("devices", [])
 
         result = []
         for d in devices_raw:
